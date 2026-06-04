@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-# @Author: 有痔不在年糕
-# @Date:   2026/6/3 21:35
-# @Last Modified by:   有痔不在年糕
-# @Last Modified time: 2026/6/3 21:35
-# @File: calc.py
-# @Software: PyCharm
 import streamlit as st
 import pandas as pd
 import math  # 核心修改：引入数学库以处理偶数取整
@@ -13,23 +6,47 @@ st.set_page_config(page_title="2026世界杯 马丁格尔排单中台", layout="
 
 st.title("🏆 2026世界杯 互斥排单中台 (跨日倍投版)")
 
-# --- 占位提示：如果你有读取 schedule.csv 的代码，请放在这里 ---
+# ==========================================
+# 恢复区域：读取赛程数据与日期筛选
+# ==========================================
+st.header("📅 第一步：查看当日赛程")
+try:
+    # 读取同目录下的赛程文件
+    df = pd.read_csv("schedule.csv")
 
-st.header("📋 第一步：选择赛事与赔率")
-match_count = st.radio("本轮包含几场比赛？", [1, 2, 3], horizontal=True)
+    # 智能寻找日期列 (适配叫 'Date' 或 '日期' 的列)
+    date_col = '日期' if '日期' in df.columns else ('Date' if 'Date' in df.columns else df.columns[0])
+
+    # 提取所有不重复的日期并生成下拉菜单
+    dates = df[date_col].unique()
+    selected_date = st.selectbox("请选择比赛日期", dates)
+
+    # 过滤并显示当天的比赛
+    matches_today = df[df[date_col] == selected_date]
+    st.dataframe(matches_today, use_container_width=True)
+
+except FileNotFoundError:
+    st.error("⚠️ 找不到 schedule.csv 文件！请确保它和 calc.py 放在同一个文件夹里，并且已经传到了 GitHub。")
+except Exception as e:
+    st.warning(f"⚠️ 读取赛程数据时出现一点小问题：{e}")
+
+# ==========================================
+# 第二步：选择场次与输入赔率
+# ==========================================
+st.header("📋 第二步：选择场次与赔率")
+match_count = st.radio("本轮准备打包几场比赛？", [1, 2, 3], horizontal=True)
 
 O_list = []
 cols = st.columns(match_count)
 for i in range(match_count):
     with cols[i]:
-        # 实际业务中可根据csv自动带入，这里保留手动输入框作为基础逻辑
-        odd = st.number_input(f"第 {i + 1} 场票面综合赔率", value=3.00, step=0.01, key=f"odd_{i}")
+        odd = st.number_input(f"第 {i + 1} 场平局赔率", value=3.00, step=0.01, key=f"odd_{i}")
         O_list.append(odd)
 
 # ==========================================
-# 核心修改区域 1：资金池配置 (保留P参数，增加中文小贴士)
+# 核心修改区域 1：资金池配置 (附带中文小贴士)
 # ==========================================
-st.header("⚙️ 第二步：全局资金池配置")
+st.header("⚙️ 第三步：全局资金池配置")
 st.markdown("请根据你的实战阶段，填写以下关键参数：")
 
 col1, col2, col3 = st.columns(3)
@@ -55,14 +72,14 @@ with col3:
 # ==========================================
 # 核心修改区域 2：计算逻辑与体彩2元偶数风控
 # ==========================================
-st.header("⚡ 第三步：生成执行单")
+st.header("⚡ 第四步：生成执行单")
 if st.button("🚀 自动生成体彩执行单"):
     # 1. 计算数学模型分母
     denom_sum = sum([1 / o for o in O_list])
     denom = 1 - denom_sum
 
     if denom <= 0:
-        st.error("⚠️ 赔率组合异常！这些赔率太低了，无法形成绝对兜底的互斥对冲，系统拒绝生成方案。")
+        st.error("⚠️ 赔率组合异常！这些赔率太低了，无法形成绝对兜底的互斥对冲，系统拒绝生成方案。请检查赔率是否输入错误。")
     else:
         # 2. 反推总目标资金（本金 + 沉没成本 + 你自定义的暴力利润）
         T = (S + P) / denom
@@ -71,7 +88,7 @@ if st.button("🚀 自动生成体彩执行单"):
         costs = []
         for o in O_list:
             exact_cost = T / o
-            # 核心算法：先除以 2 并向上取整，然后再乘以 2，确保结果绝对是大于等于精确成本的最小偶数
+            # 核心算法：先除以 2 并向上取整，然后再乘以 2，确保结果绝对是最小偶数
             even_cost = math.ceil(exact_cost / 2) * 2
             costs.append(even_cost)
 
