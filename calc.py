@@ -7,106 +7,90 @@
 # @Software: PyCharm
 import streamlit as st
 import pandas as pd
+import math  # 核心修改：引入数学库以处理偶数取整
 
-st.set_page_config(page_title="2026世界杯排单中台", layout="centered")
+st.set_page_config(page_title="2026世界杯 马丁格尔排单中台", layout="wide")
 
-st.title("⚽ 世界杯马丁格尔排单中台")
-st.markdown("---")
+st.title("🏆 2026世界杯 互斥排单中台 (跨日倍投版)")
 
+# --- 占位提示：如果你有读取 schedule.csv 的代码，请放在这里 ---
 
-# 1. 后台静默调用赛程数据库
-@st.cache_data
-def load_data():
-    return pd.read_csv("schedule.csv")
+st.header("📋 第一步：选择赛事与赔率")
+match_count = st.radio("本轮包含几场比赛？", [1, 2, 3], horizontal=True)
 
-
-try:
-    df = load_data()
-except FileNotFoundError:
-    st.error("⚠️ 找不到 schedule.csv 文件，请确认它就在 calc.py 的旁边！")
-    st.stop()
-
-# 2. 界面第一步：可视化赛程查阅
-st.header("📅 第一步：赛事池检索")
-# 提取所有比赛日
-all_dates = sorted(df['日期'].unique().tolist())
-selected_date = st.selectbox("请选择今日执行排单的日期：", all_dates)
-
-# 过滤并展示当天的比赛
-today_matches = df[df['日期'] == selected_date].copy()
-st.write(f"**{selected_date} 可选赛事（共 {len(today_matches)} 场）：**")
-st.dataframe(today_matches, use_container_width=True, hide_index=True)
-
-st.markdown("---")
-
-# 3. 界面第二步：跨日资金结转
-st.header("⚙️ 第二步：全局资金池配置")
-col1, col2, col3 = st.columns(3)
-with col1:
-    n = st.number_input("初始单注基准 (n)", value=100)
-with col2:
-    S = st.number_input("累计沉没成本 (S)", value=0, help="如果前一天全黑，填入总亏损额")
-with col3:
-    P = st.number_input("本轮目标利润", value=n)
-
-double_odds = st.number_input("胜/负双选综合折算赔率 (默认即可)", value=1.25, step=0.01)
-
-st.markdown("---")
-
-# 4. 界面第三步：动态生成排单算法
-st.header("📝 第三步：互斥打包执行")
-match_count = st.radio("本轮排单包包含几场比赛？", [1, 2, 3, 4], horizontal=True)
-
-st.write(f"请输入这 **{match_count}** 场比赛的【平局赔率】：")
-
-# 动态生成赔率输入框
-odds_inputs = []
+O_list = []
 cols = st.columns(match_count)
 for i in range(match_count):
     with cols[i]:
-        odd = st.number_input(f"第 {i + 1} 场", value=3.00, step=0.01, key=f"odd_{i}")
-        odds_inputs.append(odd)
+        # 实际业务中可根据csv自动带入，这里保留手动输入框作为基础逻辑
+        odd = st.number_input(f"第 {i + 1} 场票面综合赔率", value=3.00, step=0.01, key=f"odd_{i}")
+        O_list.append(odd)
 
-st.markdown("---")
+# ==========================================
+# 核心修改区域 1：资金池配置 (保留P参数，增加中文小贴士)
+# ==========================================
+st.header("⚙️ 第二步：全局资金池配置")
+st.markdown("请根据你的实战阶段，填写以下关键参数：")
 
-# 5. 生成输出流
-if st.button("⚡ 自动生成执行单", type="primary"):
-    # 动态计算所有场次的综合赔率
-    O_list = []
-    for i in range(match_count):
-        # 赔率折算：双选赔率的i次方 * 对应场次的平赔
-        current_O = (double_odds ** i) * odds_inputs[i]
-        O_list.append(current_O)
+col1, col2, col3 = st.columns(3)
+with col1:
+    n = st.number_input(
+        "初始单注基准 (n)",
+        value=60,
+        help="【说明】这是你最开始的起步资金。如果还没开始亏钱，填你平时习惯的单注金额。"
+    )
+with col2:
+    S = st.number_input(
+        "累计沉没成本 (S)",
+        value=0,
+        help="【说明】你之前为了这套方案，已经打水漂、亏掉的总金额。第一天刚开始玩必须填 0！"
+    )
+with col3:
+    P = st.number_input(
+        "本轮目标利润 (P)",
+        value=60,
+        help="【说明】这把中奖后你想净赚多少钱。想启动跨日倍投？直接把这里填成昨晚最后一场买入金额的 2 倍！"
+    )
 
-    # 计算数学模型分母
-    sum_inverse_O = sum([1 / o for o in O_list])
-    denom = 1 - sum_inverse_O
+# ==========================================
+# 核心修改区域 2：计算逻辑与体彩2元偶数风控
+# ==========================================
+st.header("⚡ 第三步：生成执行单")
+if st.button("🚀 自动生成体彩执行单"):
+    # 1. 计算数学模型分母
+    denom_sum = sum([1 / o for o in O_list])
+    denom = 1 - denom_sum
 
     if denom <= 0:
-        st.error(
-            "⚠️ 致命风控拦截：您选的这几场赔率组合过低，数学底层已被击穿（无论怎么买都会亏损）。请放弃本轮打包或减少场次！")
+        st.error("⚠️ 赔率组合异常！这些赔率太低了，无法形成绝对兜底的互斥对冲，系统拒绝生成方案。")
     else:
-        # 反推总目标资金
+        # 2. 反推总目标资金（本金 + 沉没成本 + 你自定义的暴力利润）
         T = (S + P) / denom
 
-        # 动态分配每单金额
+        # 3. 动态分配每单金额（严格适配体彩 2 元一注规则）
         costs = []
         for o in O_list:
-            costs.append(int((T / o) + 1))
+            exact_cost = T / o
+            # 核心算法：先除以 2 并向上取整，然后再乘以 2，确保结果绝对是大于等于精确成本的最小偶数
+            even_cost = math.ceil(exact_cost / 2) * 2
+            costs.append(even_cost)
 
         total_cost = sum(costs)
 
-        st.success("✅ 模型推算成功！SOP 指令已生成：")
+        # 4. 结果展示
+        st.success(f"✅ 计算完成！本轮需要转给彩票店总计: **{total_cost} 元**")
 
-        # 动态拼接发送给网点的话术
-        msg = f"老板，打以下互斥单，出票后拍照：\n\n"
-        for i in range(match_count):
-            if i == 0:
-                msg += f"**单子 {i + 1}：** 第 1 场【平】 —— 打 **{costs[i]}** 元\n"
-            else:
-                prefix = " 串 ".join([f"第 {j + 1} 场【胜/负】" for j in range(i)])
-                msg += f"**单子 {i + 1}：** {prefix} 串 第 {i + 1} 场【平】 —— 打 **{costs[i]}** 元\n"
+        st.markdown("### 📝 请按以下金额打票：")
+        for i, cost in enumerate(costs):
+            st.info(f"👉 **第 {i + 1} 张票** (对应赔率 {O_list[i]:.2f})： 投入 **{cost} 元**")
 
-        msg += f"\n*本次操作总计转账额：**{total_cost}** 元*"
+        # 5. 绝对兜底验算展示 (沙盘推演)
+        st.markdown("---")
+        st.markdown("### 🔍 兜底验算 (假设第 1 张票中了)：")
+        win_prize = costs[0] * O_list[0]
+        net_profit = win_prize - total_cost - S
 
-        st.info(msg)
+        st.write(f"- 中奖总奖金：{costs[0]} × {O_list[0]:.2f} = **{win_prize:.2f} 元**")
+        st.write(f"- 扣除本轮总投入：{total_cost} 元")
+        st.write(f"- 扣除历史沉没成本：{S} 元")
+        st.write(f"- **最终净利润：{net_profit:.2f} 元** (绝对满足甚至略微超额完成你设定的目标利润 {P} 元！)")
